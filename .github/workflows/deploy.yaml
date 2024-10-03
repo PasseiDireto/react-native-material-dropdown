@@ -1,0 +1,59 @@
+name: Publish packages
+
+on: workflow_dispatch
+
+jobs:
+  pre-publish-code-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets.AWS_ECS_RUN_TASK_ROLE }}
+          role-duration-seconds: 3600
+      - name: Provide a self hosted to execute this job
+        uses: PasseiDireto/gh-runner-task-action@main
+        with:
+          github_pat: ${{ secrets.PD_GITHUB2_PAT }}
+          task_definition: "gh-runner"
+          cluster: "gh-runner"
+
+  publish-code-artifact:
+    needs: pre-publish-code-artifact
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          token: ${{ secrets.PD_GITHUB2_PAT }}
+          fetch-depth: 0
+      - name: Set Git config
+        run: |
+          git config user.name pd-bot
+          git config user.email admin@passeidireto.com
+      - name: configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ secrets.AWS_LIB_PUBLISH_ROLE }}
+          role-duration-seconds: 3600
+      - name: Setup nodejs
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: AWS CodeArtifact Login
+        run: npm run ca:login
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Run build
+        run: npm run build
+      - name: publish to Code Artifact
+        env: 
+          GH_TOKEN: ${{ secrets.PD_GITHUB2_PAT }}
+        run: npm run publish
